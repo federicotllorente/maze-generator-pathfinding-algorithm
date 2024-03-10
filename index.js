@@ -1,6 +1,6 @@
-const LOOP_INTERVAL = 300
+const LOOP_INTERVAL = 30
 
-const GRID_COLS = 20
+const GRID_COLS = 30
 const GRID_ROWS = GRID_COLS
 
 const CELL_SIZE = window.innerHeight < window.innerWidth
@@ -13,142 +13,168 @@ const visitedCells = []
 const unvisitedCells = []
 let int, canvas, current
 
-function drawLine(startX, startY, endX, endY) {
+function drawSide(side, position) {
+  if (side < 1 || side > 6) return
+
+  const hexagonSize = CELL_SIZE / 2
+  const hexagonWidth = Math.sqrt(3) * hexagonSize
+  const hexagonHeight = 2 * hexagonSize
+
   const ctx = canvas.getContext('2d')
   ctx.strokeStyle = 'rgb(255, 255, 255)'
   ctx.lineWidth = 1
-
   ctx.beginPath()
-  ctx.moveTo(startX, startY)
-  ctx.lineTo(endX, endY)
+
+  const x = (position.x * hexagonWidth + (position.y % 2) * hexagonWidth / 2) + CELL_SIZE / 2
+  const y = (position.y * hexagonHeight * 0.75) + CELL_SIZE / 2
+
+  ctx.moveTo(x + hexagonSize * Math.sin((side - 1) * 2 * Math.PI / 6), y + hexagonSize * Math.cos((side - 1) * 2 * Math.PI / 6))
+  ctx.lineTo(x + hexagonSize * Math.sin(side * 2 * Math.PI / 6), y + hexagonSize * Math.cos(side * 2 * Math.PI / 6))
+
   ctx.stroke()
 }
 
 function removeWalls(a, b) {
   const x = a.x - b.x
+  const y = a.y - b.y
 
-  if (x === 1) {
-    // LEFT NEIGHBOR
-    a.walls.left = false
-    b.walls.right = false
+  if (x === 0 && y === -1) {
+    // BOTTOM RIGHT NEIGHBOR
+    a.walls.bottomRight = false
+    b.walls.topLeft = false
     return
   }
 
-  if (x === -1) {
+  if (x === -1 && y === 0) {
     // RIGHT NEIGHBOR
     a.walls.right = false
     b.walls.left = false
     return
   }
 
-  const y = a.y - b.y
-
-  if (y === 1) {
-    // TOP NEIGHBOR
-    a.walls.top = false
-    b.walls.bottom = false
+  if (x === 0 && y === 1) {
+    // TOP RIGHT NEIGHBOR
+    a.walls.topRight = false
+    b.walls.bottomLeft = false
     return
   }
 
-  if (y === -1) {
-    // BOTTOM NEIGHBOR
-    a.walls.bottom = false
-    b.walls.top = false
+  if (x === -1 && y === 1) {
+    // TOP LEFT NEIGHBOR
+    a.walls.topLeft = false
+    b.walls.bottomRight = false
+    return
+  }
+
+  if (x === 1 && y === 0) {
+    // LEFT NEIGHBOR
+    a.walls.left = false
+    b.walls.right = false
+    return
+  }
+
+  if (x === -1 && y === -1) {
+    // BOTTOM LEFT NEIGHBOR
+    a.walls.bottomLeft = false
+    b.walls.topRight = false
     return
   }
 }
 
 class Cell {
   constructor(x, y) {
-    // Location
     this.x = x
     this.y = y
 
     this.walls = {
-      top: true,
+      bottomRight: true,
       right: true,
-      bottom: true,
-      left: true
+      topRight: true,
+      topLeft: true,
+      left: true,
+      bottomLeft: true
     }
 
     this.wasVisited = false
 
-    this.highlight = function() {
+    this.highlight = function(color) {
       const ctx = canvas.getContext('2d')
-      ctx.fillStyle = 'rgb(100, 155, 100)'
-      ctx.fillRect(this.x * CELL_SIZE, this.y * CELL_SIZE, CELL_SIZE - 1, CELL_SIZE - 1)
+
+      const hexagonSize = CELL_SIZE / 2
+      const hexagonWidth = Math.sqrt(3) * hexagonSize
+      const hexagonHeight = 2 * hexagonSize
+
+      ctx.beginPath()
+
+      const x = (this.x * hexagonWidth + (this.y % 2) * hexagonWidth / 2) + CELL_SIZE / 2
+      const y = (this.y * hexagonHeight * 0.75) + CELL_SIZE / 2
+
+      ctx.moveTo(x + hexagonSize * Math.sin(0), y + hexagonSize * Math.cos(0))
+
+      for (let side = 0; side < 7; side++) {
+        ctx.lineTo(x + hexagonSize * Math.sin(side * 2 * Math.PI / 6), y + hexagonSize * Math.cos(side * 2 * Math.PI / 6))
+      }
+
+      ctx.fillStyle = color ? color : 'rgb(100, 155, 100)'
+      ctx.fill()
     }
 
     this.show = function() {
-      // Draw top wall
-      if (this.walls.top) {
-        drawLine(
-          this.x * CELL_SIZE,
-          this.y * CELL_SIZE,
-          (this.x + 1) * CELL_SIZE,
-          this.y * CELL_SIZE
-        )
-      }
-  
-      // Draw right wall
-      if (this.walls.right) {
-        drawLine(
-          (this.x + 1) * CELL_SIZE,
-          this.y * CELL_SIZE,
-          (this.x + 1) * CELL_SIZE,
-          (this.y + 1) * CELL_SIZE
-        )
-      }
-  
-      // Draw bottom wall
-      if (this.walls.bottom) {
-        drawLine(
-          this.x * CELL_SIZE,
-          (this.y + 1) * CELL_SIZE,
-          (this.x + 1) * CELL_SIZE,
-          (this.y + 1) * CELL_SIZE
-        )
-      }
-  
-      // Draw left wall
-      if (this.walls.left) {
-        drawLine(
-          this.x * CELL_SIZE,
-          this.y * CELL_SIZE,
-          this.x * CELL_SIZE,
-          (this.y + 1) * CELL_SIZE
-        )
-      }
+      // 1 = bottom right
+      // 2 = right
+      // 3 = top right
+      // 4 = top left
+      // 5 = left
+      // 6 = bottom left
+
+      const position = { x: this.x, y: this.y }
+
+      if (this.walls.bottomRight) drawSide(1, position)
+      if (this.walls.right) drawSide(2, position)
+      if (this.walls.topRight) drawSide(3, position)
+      if (this.walls.topLeft) drawSide(4, position)
+      if (this.walls.left) drawSide(5, position)
+      if (this.walls.bottomLeft) drawSide(6, position)
   
       if (this.wasVisited) {
-        const ctx = canvas.getContext('2d')
-        ctx.fillStyle = 'rgb(100, 0, 255)'
-        ctx.fillRect(this.x * CELL_SIZE, this.y * CELL_SIZE, CELL_SIZE - 1, CELL_SIZE - 1)
+        this.highlight('rgb(100, 0, 255)')
       }
     }
 
     this.checkNeighbors = function() {
       const neighbors = []
 
-      const top = grid[this.x]?.[this.y - 1]
-      const right = grid[this.x + 1]?.[this.y]
-      const bottom = grid[this.x]?.[this.y + 1]
-      const left = grid[this.x - 1]?.[this.y]
+      const yIsOdd = this.y % 2 === 1
 
-      if (top && !top.wasVisited) {
-        neighbors.push(top)
+      const bottomRight = yIsOdd ? grid[this.x + 1]?.[this.y + 1] : grid[this.x]?.[this.y + 1]
+      const right = grid[this.x + 1]?.[this.y]
+      const topRight = yIsOdd ? grid[this.x + 1]?.[this.y - 1] : grid[this.x]?.[this.y - 1]
+      const topLeft = yIsOdd ? grid[this.x]?.[this.y - 1] : grid[this.x - 1]?.[this.y - 1]
+      const left = grid[this.x - 1]?.[this.y]
+      const bottomLeft = yIsOdd ? grid[this.x]?.[this.y + 1] : grid[this.x - 1]?.[this.y + 1]
+
+      if (bottomRight && !bottomRight.wasVisited) {
+        neighbors.push(bottomRight)
       }
 
       if (right && !right.wasVisited) {
         neighbors.push(right)
       }
 
-      if (bottom && !bottom.wasVisited) {
-        neighbors.push(bottom)
+      if (topRight && !topRight.wasVisited) {
+        neighbors.push(topRight)
       }
 
+      if (topLeft && !topLeft.wasVisited) {
+        neighbors.push(topLeft)
+      }
+      
       if (left && !left.wasVisited) {
         neighbors.push(left)
+      }
+
+      if (bottomLeft && !bottomLeft.wasVisited) {
+        neighbors.push(bottomLeft)
       }
 
       if (neighbors.length > 0) {
@@ -169,7 +195,7 @@ function setup() {
   app.appendChild(canvas)
 
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = 'rgb(25, 25, 25)'
+  ctx.fillStyle = 'rgba(25, 25, 25, 0.7)'
   ctx.fillRect(0, 0, GRID_ROWS * CELL_SIZE, GRID_COLS * CELL_SIZE)
 
   // Making a 2D array
@@ -191,9 +217,9 @@ function loop() {
       grid[i][j].show()
     }
   }
-
+  
   current.wasVisited = true
-  current.highlight()
+  current.highlight('rgb(255, 0, 100)')
 
   const next = current.checkNeighbors()
   if (next) {
