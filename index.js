@@ -1,6 +1,6 @@
-const LOOP_INTERVAL = 30
+const LOOP_INTERVAL = 100
 
-const GRID_COLS = 30
+const GRID_COLS = 10
 const GRID_ROWS = GRID_COLS
 
 const CELL_SIZE = window.innerHeight < window.innerWidth
@@ -8,10 +8,16 @@ const CELL_SIZE = window.innerHeight < window.innerWidth
   : (window.innerWidth - 16) / GRID_COLS
 
 let grid = []
-const stack = []
-const visitedCells = []
-const unvisitedCells = []
-let int, canvas, current
+let path = []
+
+const stack = [] // Cells that have been re-visited when generating
+const openSet = [] // Cells that need to be evaluated for pathfinding
+const closedSet = [] // Cells that have been evaluated for pathfinding
+
+let int, canvas, current, goal
+
+let isGenerationFinished = false
+let isSearchingFinished
 
 function drawSide(side, position) {
   if (side < 1 || side > 6) return
@@ -22,7 +28,7 @@ function drawSide(side, position) {
 
   const ctx = canvas.getContext('2d')
   ctx.strokeStyle = 'rgb(255, 255, 255)'
-  ctx.lineWidth = 1
+  ctx.lineWidth = 2
   ctx.beginPath()
 
   const x = (position.x * hexagonWidth + (position.y % 2) * hexagonWidth / 2) + CELL_SIZE / 2
@@ -34,68 +40,92 @@ function drawSide(side, position) {
   ctx.stroke()
 }
 
-function removeWalls(a, b) {
-  const x = a.x - b.x
-  const y = a.y - b.y
+function distBetween(a, b) {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
 
-  if (x === 0 && y === -1) {
+function removeWalls(a, b) {
+  let x = a.x - b.x
+  let y = a.y - b.y
+
+  const rowIsOdd = a.y % 2 === 1
+
+  if ((!rowIsOdd && x === 0 && y === -1) || (rowIsOdd && x === -1 && y === -1)) {
     // BOTTOM RIGHT NEIGHBOR
-    a.walls.bottomRight = false
-    b.walls.topLeft = false
+    a.walls[0] = false
+    b.walls[3] = false
     return
   }
 
   if (x === -1 && y === 0) {
     // RIGHT NEIGHBOR
-    a.walls.right = false
-    b.walls.left = false
+    a.walls[1] = false
+    b.walls[4] = false
     return
   }
 
-  if (x === 0 && y === 1) {
+  if ((!rowIsOdd && x === 0 && y === 1) || (rowIsOdd && x === -1 && y === 1)) {
     // TOP RIGHT NEIGHBOR
-    a.walls.topRight = false
-    b.walls.bottomLeft = false
+    a.walls[2] = false
+    b.walls[5] = false
     return
   }
 
-  if (x === -1 && y === 1) {
+  if ((!rowIsOdd && x === 1 && y === 1) || (rowIsOdd && x === 0 && y === 1)) {
     // TOP LEFT NEIGHBOR
-    a.walls.topLeft = false
-    b.walls.bottomRight = false
+    a.walls[3] = false
+    b.walls[0] = false
     return
   }
 
   if (x === 1 && y === 0) {
     // LEFT NEIGHBOR
-    a.walls.left = false
-    b.walls.right = false
+    a.walls[4] = false
+    b.walls[1] = false
     return
   }
 
-  if (x === -1 && y === -1) {
+  if ((!rowIsOdd && x === 1 && y === -1) || (rowIsOdd && x === 0 && y === -1)) {
     // BOTTOM LEFT NEIGHBOR
-    a.walls.bottomLeft = false
-    b.walls.topRight = false
+    a.walls[5] = false
+    b.walls[2] = false
     return
+  }
+}
+
+function removeFromArray(arr, el) {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i] == el) {
+      arr.splice(i, 1)
+    }
   }
 }
 
 class Cell {
   constructor(x, y) {
+    // Location
     this.x = x
     this.y = y
 
-    this.walls = {
-      bottomRight: true,
-      right: true,
-      topRight: true,
-      topLeft: true,
-      left: true,
-      bottomLeft: true
-    }
+    // Distance
+    this.f = 0
+    this.g = 0
+    this.h = 0
 
-    this.wasVisited = false
+    this.walls = [
+      true, // bottomRight
+      true, // right
+      true, // topRight
+      true, // topLeft
+      true, // left
+      true // bottomLeft
+    ]
+
+    this.wasVisited = false // When generating
+    this.neighbor = null // Linked/communicating neighbor
+    this.previous = null
 
     this.highlight = function(color) {
       const ctx = canvas.getContext('2d')
@@ -129,29 +159,32 @@ class Cell {
 
       const position = { x: this.x, y: this.y }
 
-      if (this.walls.bottomRight) drawSide(1, position)
-      if (this.walls.right) drawSide(2, position)
-      if (this.walls.topRight) drawSide(3, position)
-      if (this.walls.topLeft) drawSide(4, position)
-      if (this.walls.left) drawSide(5, position)
-      if (this.walls.bottomLeft) drawSide(6, position)
+      this.walls.map((isWall, idx) => {
+        if (isWall) drawSide(idx + 1, position)
+      })
+
+      const isInStack = stack.find(cell => cell.x === this.x && cell.y === this.y)
   
       if (this.wasVisited) {
-        this.highlight('rgb(100, 0, 255)')
+        if (isInStack) {
+          this.highlight('rgb(100, 0, 255)')
+        } else {
+          this.highlight('rgb(200, 0, 255)')
+        }
       }
     }
 
     this.checkNeighbors = function() {
       const neighbors = []
 
-      const yIsOdd = this.y % 2 === 1
+      const rowIsOdd = this.y % 2 === 1
 
-      const bottomRight = yIsOdd ? grid[this.x + 1]?.[this.y + 1] : grid[this.x]?.[this.y + 1]
+      const bottomRight = rowIsOdd ? grid[this.x + 1]?.[this.y + 1] : grid[this.x]?.[this.y + 1]
       const right = grid[this.x + 1]?.[this.y]
-      const topRight = yIsOdd ? grid[this.x + 1]?.[this.y - 1] : grid[this.x]?.[this.y - 1]
-      const topLeft = yIsOdd ? grid[this.x]?.[this.y - 1] : grid[this.x - 1]?.[this.y - 1]
+      const topRight = rowIsOdd ? grid[this.x + 1]?.[this.y - 1] : grid[this.x]?.[this.y - 1]
+      const topLeft = rowIsOdd ? grid[this.x]?.[this.y - 1] : grid[this.x - 1]?.[this.y - 1]
       const left = grid[this.x - 1]?.[this.y]
-      const bottomLeft = yIsOdd ? grid[this.x]?.[this.y + 1] : grid[this.x - 1]?.[this.y + 1]
+      const bottomLeft = rowIsOdd ? grid[this.x]?.[this.y + 1] : grid[this.x - 1]?.[this.y + 1]
 
       if (bottomRight && !bottomRight.wasVisited) {
         neighbors.push(bottomRight)
@@ -178,11 +211,83 @@ class Cell {
       }
 
       if (neighbors.length > 0) {
-        return neighbors[Math.floor(Math.random() * neighbors.length)]
+        const neighbor = neighbors[Math.floor(Math.random() * neighbors.length)]
+        this.neighbor = neighbor
+        return neighbor
       } else {
         return undefined
       }
     }
+  }
+}
+
+function aStarPathfinding() {
+  if (!goal) return
+  goal.highlight('rgb(255, 155, 100)')
+  
+  // A* algo
+  if (openSet.length > 0) {
+    let lowestF = 0
+    // Evaluate every cell in the open set
+    for (let i = 0; i < openSet.length; i++) {
+      if (openSet[i].f < openSet[lowestF].f) {
+        lowestF = i
+      }
+    }
+
+    current = openSet[lowestF]
+
+    if (current === goal) {
+      console.log('DONE!')
+      clearInterval(int)
+      isSearchingFinished = true
+    }
+
+    // Remove current spot from the open set and add it to the closed set
+    removeFromArray(openSet, current)
+    closedSet.push(current)
+
+    if (!closedSet.includes(current.neighbor)) {
+      // Distance from start to neighbor
+      let tentativeG = current.g + 1 // TODO 1 being the distance between current and the neighbor
+      let isNewPath = false
+
+      if (openSet.includes(current.neighbor)) {
+        if (tentativeG < current.neighbor.g) {
+          current.neighbor.g = tentativeG
+          isNewPath = true
+        }
+      } else {
+        current.neighbor.g = tentativeG
+        isNewPath = true
+        openSet.push(current.neighbor)
+      }
+
+      if (isNewPath) {
+        current.neighbor.h = distBetween(current.neighbor, goal) // Distance between the neighbor and the goal (heuristic cost estimate?)
+        current.neighbor.f = current.neighbor.g + current.neighbor.h
+        current.neighbor.previous = current
+      }
+    }
+  } else {
+    // TODO There should always be a solution, right?
+    console.log('NO SOLUTION FOR PATHFINDING :(')
+    clearInterval(int)
+    isSearchingFinished = true
+  }
+
+  // Find the path
+  path = []
+  let temp = current
+  path.push(current)
+  while (temp?.previous) {
+    path.push(temp.previous)
+    temp = temp.previous
+  }
+
+  // Highlight the cells in the path
+  for (let i = 0; i < path.length; i++) {
+    path[i]?.highlight('rgb(100, 0, 255)')
   }
 }
 
@@ -217,21 +322,26 @@ function loop() {
       grid[i][j].show()
     }
   }
-  
+
   current.wasVisited = true
   current.highlight('rgb(255, 0, 100)')
 
-  const next = current.checkNeighbors()
-  if (next) {
-    next.wasVisited = true
-    stack.push(current)
-    removeWalls(current, next)
-    current = next
-  } else if (stack.length > 0) {
-    current = stack.pop()
+  if (isGenerationFinished) {
+    // aStarPathfinding()
   } else {
-    console.log('DONE!')
-    clearInterval(int)
+    const next = current.checkNeighbors()
+    if (next) {
+      next.wasVisited = true
+      stack.push(current)
+      removeWalls(current, next)
+      current = next
+    } else if (stack.length > 0) {
+      current = stack.pop()
+    } else {
+      console.log('DONE!')
+      isGenerationFinished = true
+      clearInterval(int)
+    }
   }
 }
 
@@ -243,14 +353,36 @@ let isPaused = false
 // Start/pause/resume searching when the spacebar is tapped
 document.addEventListener('keydown', (event) => {
   if (event.code === 'Space') {
-    if (!isPaused) {
-      clearInterval(int)
-      console.log('PAUSED')
-      isPaused = true
-    } else {
-      int = setInterval(loop, LOOP_INTERVAL)
-      console.log('RESUMED')
-      isPaused = false
+    if (isGenerationFinished && isSearchingFinished) return
+
+    // TODO
+    if (!isGenerationFinished || !isSearchingFinished) {
+      if (!isPaused) {
+        clearInterval(int)
+        console.log('PAUSED')
+        isPaused = true
+      } else {
+        int = setInterval(loop, LOOP_INTERVAL)
+        console.log('RESUMED')
+        isPaused = false
+      }
+    }
+
+    // TODO
+    if (isGenerationFinished && !isSearchingFinished) {
+      if (!goal) {
+        const randomX = Math.floor(Math.random() * GRID_COLS)
+        const randomY = randomX === 0 ? Math.floor(Math.random() * GRID_ROWS - 1) + 1 : Math.floor(Math.random() * GRID_ROWS)
+
+        // Set cell goal
+        goal = grid[randomX][randomY]
+        goal.highlight('rgb(255, 155, 100)')
+        
+        // Init open set
+        openSet.push(current)
+
+        isPaused = true
+      }
     }
   }
 })
