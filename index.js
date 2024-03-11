@@ -1,6 +1,6 @@
-const LOOP_INTERVAL = 100
+const LOOP_INTERVAL = 50
 
-const GRID_COLS = 10
+const GRID_COLS = 40
 const GRID_ROWS = GRID_COLS
 
 const CELL_SIZE = window.innerHeight < window.innerWidth
@@ -24,7 +24,7 @@ function drawSide(side, position) {
 
   const hexagonSize = CELL_SIZE / 2
   const hexagonWidth = Math.sqrt(3) * hexagonSize
-  const hexagonHeight = 2 * hexagonSize
+  const hexagonHeight = CELL_SIZE
 
   const ctx = canvas.getContext('2d')
   ctx.strokeStyle = 'rgb(255, 255, 255)'
@@ -38,6 +38,63 @@ function drawSide(side, position) {
   ctx.lineTo(x + hexagonSize * Math.sin(side * 2 * Math.PI / 6), y + hexagonSize * Math.cos(side * 2 * Math.PI / 6))
 
   ctx.stroke()
+}
+
+function drawPathLine(color) {
+  const hexagonSize = CELL_SIZE / 2
+  const hexagonWidth = Math.sqrt(3) * hexagonSize
+  const hexagonHeight = CELL_SIZE
+
+  const ctx = canvas.getContext('2d')
+  const vertices = []
+  const pathToDraw = [...path].reverse()
+
+  if (pathToDraw.length > 1 && !isSearchingFinished) pathToDraw.pop()
+
+  let startX = (pathToDraw[0].x * hexagonWidth) + hexagonSize
+  let startY = (pathToDraw[0].y * hexagonHeight) + hexagonSize
+
+  // Draw first circle at starting point
+  ctx.arc(startX, startY, hexagonSize / 10, 0, 2 * Math.PI)
+  ctx.fill()
+  ctx.closePath()
+
+  // Draw circles and set vertices
+  for (let i = 1; i < pathToDraw.length; i++) {
+    const cell = pathToDraw[i]
+
+    let endX = (cell.x * hexagonWidth) + hexagonSize
+    
+    const rowIsOdd = cell.y % 2 === 1
+    
+    let evenSides = Math.ceil(cell.y / 2)
+    let oddSides = Math.floor(cell.y / 2)
+
+    let endY = evenSides * hexagonHeight + oddSides * hexagonSize + hexagonSize
+
+    if (rowIsOdd) {
+      endX += hexagonWidth / 2
+      endY -= hexagonWidth / 4
+    }
+
+    vertices.push({ endX, endY })
+    ctx.arc(endX, endY, hexagonSize / 10, 0, 2 * Math.PI)
+    ctx.fill()
+    ctx.closePath()
+  }
+
+  ctx.strokeStyle = color ?? 'rgb(255, 0, 100)'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+
+  ctx.moveTo(startX, startY)
+
+  for (let i = 0; i < vertices.length; i++) {
+    ctx.lineTo(vertices[i].endX, vertices[i].endY)
+  }
+
+  ctx.stroke()
+  ctx.closePath()
 }
 
 function distBetween(a, b) {
@@ -132,7 +189,7 @@ class Cell {
 
       const hexagonSize = CELL_SIZE / 2
       const hexagonWidth = Math.sqrt(3) * hexagonSize
-      const hexagonHeight = 2 * hexagonSize
+      const hexagonHeight = CELL_SIZE
 
       ctx.beginPath()
 
@@ -285,8 +342,11 @@ function aStarPathfinding() {
   path.push(current)
   while (temp?.previous) {
     path.push(temp.previous)
+    // path.unshift(temp.previous)
     temp = temp.previous
   }
+
+  drawPathLine('rgb(255, 155, 100)')
 }
 
 function setup() {
