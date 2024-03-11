@@ -124,7 +124,7 @@ class Cell {
     ]
 
     this.wasVisited = false // When generating
-    this.neighbor = null // Linked/communicating neighbor
+    this.neighbors = []
     this.previous = null
 
     this.highlight = function(color) {
@@ -164,10 +164,14 @@ class Cell {
       })
 
       const isInStack = stack.find(cell => cell.x === this.x && cell.y === this.y)
+      const isInPath = path.find(cell => cell.x === this.x && cell.y === this.y)
+      const isInClosedSet = closedSet.find(cell => cell.x === this.x && cell.y === this.y)
   
       if (this.wasVisited) {
-        if (isInStack) {
+        if (isInStack || isInPath) {
           this.highlight('rgb(100, 0, 255)')
+        } else if (isInClosedSet) {
+          this.highlight('rgba(200, 0, 255, 0.7)')
         } else {
           this.highlight('rgb(200, 0, 255)')
         }
@@ -211,9 +215,9 @@ class Cell {
       }
 
       if (neighbors.length > 0) {
-        const neighbor = neighbors[Math.floor(Math.random() * neighbors.length)]
-        this.neighbor = neighbor
-        return neighbor
+        const chosenNeighbor = neighbors[Math.floor(Math.random() * neighbors.length)]
+        this.neighbors.push(chosenNeighbor)
+        return chosenNeighbor
       } else {
         return undefined
       }
@@ -247,33 +251,32 @@ function aStarPathfinding() {
     removeFromArray(openSet, current)
     closedSet.push(current)
 
-    if (!closedSet.includes(current.neighbor)) {
-      // Distance from start to neighbor
-      let tentativeG = current.g + 1 // TODO 1 being the distance between current and the neighbor
-      let isNewPath = false
-
-      if (openSet.includes(current.neighbor)) {
-        if (tentativeG < current.neighbor.g) {
-          current.neighbor.g = tentativeG
+    for (let i = 0; i < current.neighbors.length; i++) {
+      // Check every neighbor
+      const neighbor = current.neighbors[i]
+      if (!closedSet.includes(neighbor)) {
+        // Distance from start to neighbor
+        let tentativeG = current.g + 1 // TODO 1 being the distance between current and the neighbor
+        let isNewPath = false
+  
+        if (openSet.includes(neighbor)) {
+          if (tentativeG < neighbor.g) {
+            neighbor.g = tentativeG
+            isNewPath = true
+          }
+        } else {
+          neighbor.g = tentativeG
           isNewPath = true
+          openSet.push(neighbor)
         }
-      } else {
-        current.neighbor.g = tentativeG
-        isNewPath = true
-        openSet.push(current.neighbor)
-      }
-
-      if (isNewPath) {
-        current.neighbor.h = distBetween(current.neighbor, goal) // Distance between the neighbor and the goal (heuristic cost estimate?)
-        current.neighbor.f = current.neighbor.g + current.neighbor.h
-        current.neighbor.previous = current
+  
+        if (isNewPath) {
+          neighbor.h = distBetween(neighbor, goal) // Distance between the neighbor and the goal (heuristic cost estimate?)
+          neighbor.f = neighbor.g + neighbor.h
+          neighbor.previous = current
+        }
       }
     }
-  } else {
-    // TODO There should always be a solution, right?
-    console.log('NO SOLUTION FOR PATHFINDING :(')
-    clearInterval(int)
-    isSearchingFinished = true
   }
 
   // Find the path
@@ -283,11 +286,6 @@ function aStarPathfinding() {
   while (temp?.previous) {
     path.push(temp.previous)
     temp = temp.previous
-  }
-
-  // Highlight the cells in the path
-  for (let i = 0; i < path.length; i++) {
-    path[i]?.highlight('rgb(100, 0, 255)')
   }
 }
 
@@ -327,7 +325,7 @@ function loop() {
   current.highlight('rgb(255, 0, 100)')
 
   if (isGenerationFinished) {
-    // aStarPathfinding()
+    aStarPathfinding()
   } else {
     const next = current.checkNeighbors()
     if (next) {
